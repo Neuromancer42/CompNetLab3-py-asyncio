@@ -133,7 +133,33 @@ class Server(object):
             conn.close()
         logging.debug("{0}: stopping".format(self))
 
+# default update_alpha for EWMA estimate
+update_alpha = 1.0
 
 if __name__ == "__main__":
-    server = Server(("127.0.0.1", 9876))
+    if len(sys.argv) is not 7 or 8:
+        print('Usage: ', sys.argv[0], ' <log> <alpha> <listen-port> <fake-ip> <dns-ip> <dns-port> [<www-ip>].')
+        sys.exit(1)
+
+    # set logger files
+    logfile = logging.FileHandler(sys.argv[1])
+    logfile.setLevel(logging.CRITICAL)
+    logging.getLogger('').addHandler(logfile)
+
+    # set update-alpha for EWMA esitmate
+    update_alpha = float(sys.argv[2])
+
+    # set listen-port
+    port = int(sys.argv[3])
+
+    # set fake-ip
+    fake_ip = sys.argv[4]
+
+    # set dns
+    dns_ip = sys.argv[5]
+    dns_port = int(sys.argv[6])
+
+    if len(sys.argv) is 8:
+        www_ip = sys.argv[7]
+    server = Server(("127.0.0.1", port))
     server.start()
