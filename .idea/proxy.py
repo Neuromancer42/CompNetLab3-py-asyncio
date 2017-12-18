@@ -14,6 +14,7 @@ NONBLOCKING = (errno.EAGAIN, errno.EWOULDBLOCK)
 if sys.platform == "win32":
     NONBLOCKING = NONBLOCKING + (errno.WSAEWOULDBLOCK,)
 
+
 class Connection(object):
 
     def __init__(self, sock, address, loop):
@@ -70,6 +71,7 @@ class Connection(object):
         self.sock.close()
         logging.debug("{0}: closed".format(self))
 
+
 class Server(object):
 
     def __init__(self, address):
@@ -80,16 +82,16 @@ class Server(object):
         self.address = self.sock.getsockname()
         self.loop = pyuv.Loop.default_loop()
         self.poll_watcher = pyuv.Poll(self.loop, self.sock.fileno())
-        self.async = pyuv.Async(self.loop, self.aync_cb)
+        self.async = pyuv.Async(self.loop, self.async_cb)
         self.conns = weakref.WeakValueDictionary()
         self.signal_watchers = set()
 
     def handle_error(self, msg, level=logging.ERROR, exc_info=True):
-        logging.log(level, "(0): {1} --> stopping".format(self, msg),  exc_info=exc_info)
+        logging.log(level, "{0}: {1} --> stopping".format(self, msg), exc_info=exc_info)
         self.stop()
 
-    def signal_cb(self, handle, sginum):
-        handle.async.send()
+    def signal_cb(self, handle, signum):
+        self.async.send()
 
     def async_cb(self, handle):
         handle.close()
@@ -99,7 +101,7 @@ class Server(object):
         try:
             while True:
                 try:
-                    sock.adddress - self.sock.accept()
+                    sock, address = self.sock.accept()
                 except socket.error as err:
                     if err.args[0] in NONBLOCKING:
                         break
@@ -117,6 +119,8 @@ class Server(object):
             handle = pyuv.Signal(self.loop)
             handle.start(self.signal_cb, sig)
             self.signal_watchers.add(handle)
+        logging.debug("{0}: started on {0.address}".format(self))
+        self.loop.run()
         logging.debug("{0}: stopped".format(self))
 
     def stop(self):
@@ -129,6 +133,7 @@ class Server(object):
             conn.close()
         logging.debug("{0}: stopping".format(self))
 
+
 if __name__ == "__main__":
-    server = Server(("127.0.0.1", 10001))
+    server = Server(("127.0.0.1", 9876))
     server.start()
