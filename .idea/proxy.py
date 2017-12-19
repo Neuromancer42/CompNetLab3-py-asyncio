@@ -83,15 +83,14 @@ def on_client_read(client, data, error):
                 logging.debug("Can't resolve domain name")
             else:
                 file_property = check_video_requests(new_url)
-                start_connect_server(client, method, url, version) # TODO
+                start_connect_server(client, method, version, server, new_url, headers, data, file_property)
     else:
         logger.debug("{0}: close connect from {1}".format(error, client))
         client.close()
         clients.remove(client)
         return
-    client.write(data)
 
-# note: qname is converted name to query
+# note: qname is already converted name to query
 def query_name(qname):
     packet = struct.pack(">H", 1234)        # arbitary chosen id
     packet += struct.pack(">H", 0)          # flags
@@ -104,21 +103,21 @@ def query_name(qname):
     packet += struct.pack("B", 0)           # end of qname
     packet += struct.pack(">H", 1)          # query type
     packet += struct.pack(">H", 1)          # query class
-    dns_local = pyuv.UDP(loop)
-    dns_local.bind('', 0)
-    dns_local.send((dns_ip, dns_port), packet)
-    ans_ip = start_recv(handle_dns_response)
-    return ans_ip
 
-def handle_dns_response(udp_handle, (ip, port), flags, data, error):
-    if error:
-        logging.debug("{0}".format(error))
-        return None
-    else:
-        ip_bytes = data[46:50]
+    # for simplification, blocking query
+    dns_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        logging.debug("DNS query: {0}".format(packet))
+        sent = dns_sock.sendto(packet, (dns_ip, dns_port))
+        data, dns_server = dns_sock.recvfrom(4096)
+        logging.debug("DNS response: {0}".format(data))
+        ip_bytes = data[46:50]  # hack
         ans_ip = str(netaddr.IPAddress(int.from_bytes(ip_bytes, byteorder='big')))
         logging.debug("Get content server IP {0} from DNS".format(ans_ip))
-        return ans_ip
+    finally:
+        logging.debug("Close dns socket")
+        dns_sock.close()
+    return ans_ip
 
 def check_video_requests(uri):
     rURI = re.compile("((.*?)((([^/]*)\\.f4m)|((\\d+)Seg(\\d+)-Frag(\\d+))))")
@@ -156,6 +155,10 @@ class file_property:
         self.ismeta, self.metaname, self.isbigbuck = ismeta, metaname, isbigbuck
         self.ischunk, self.seg, self.frag = ischunk, seg, frag
 
+def start_connect_server(client, method, version, server, new_url, headers, data, file_property):
+    # TODO
+    skip
+    
 # default update_alpha for EWMA estimate
 update_alpha = 1.0
 
