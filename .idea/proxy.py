@@ -1,143 +1,118 @@
+from __future__ import print_function
 
 import sys
 import socket
 import signal
-import weakref
-import errno
 import logging
 import pyuv
+import re
 
 logging.basicConfig(level=logging.DEBUG)
-
 STOPSIGNALS = (signal.SIGINT, signal.SIGTERM)
 NONBLOCKING = (errno.EAGAIN, errno.EWOULDBLOCK)
 if sys.platform == "win32":
     NONBLOCKING = NONBLOCKING + (errno.WSAEWOULDBLOCK,)
 
 
-class Connection(object):
+def on_client_connection(proxy, error):
+    client = pyuv.TCP(proxy.loop)
+    proxy.accept(client)
+    clients.append(client)
+    client.start_read(on_client_read)
 
-    def __init__(self, sock, address, loop):
-        self.sock = sock
-        self.address = address
-        self.sock.setblocking(0)
-        self.buf = ""
-        self.watcher = pyuv.Poll(loop, self.sock.fileno())
-        self.watcher.start(pyuv.UV_READABLE, self.io_cb)
-        logging.debug("{0}: ready".format(self))
 
-    def reset(self, events):
-        self.watcher.start(events, self.io_cb)
-
-    def handle_error(self, msg, level=logging.ERROR, exc_info=True):
-        logging.log(level, "{0}: {1} --> closing".format(self, msg), exc_info=exc_info)
-        self.close()
-
-    def handle_read(self):
-        try:
-            buf = self.sock.recv(8192)
-        except socket.error as err:
-            if err.args[0] not in NONBLOCKING:
-                self.handle_error("error reading from {0}".format(self.sock))
-        if buf:
-            self.buf += buf
-            self.reset(pyuv.UV_READABLE | pyuv.UV_WRITABLE)
+def on_client_read(client, data, error):
+    if data is None:
+        logger.debug("no data: close connect from {0}".format(client))
+        client.close()
+        clients.remove(client)
+        return
+    if not error:
+        if headers is None:
+            headers = data.decode("ascii")
         else:
-            self.handle_error("connection closed by peer", logging.DEBUG, False)
-
-    def handle_write(self):
-        try:
-            sent = self.sock.send(self.buf) # TODO: fix send_back buffer
-        except socket.error as err:
-            if err.args[0] not in NONBLOCKING:
-                self.handle_error("error writing to {0}".format(self.sock))
+            headers += data.decode("ascii")
+        if "\r\b\r\b\n" not in fHeaders:
+            client.start_read(on_client_read)
         else:
-            self.buf = self.buf[sent:]
-            if not self.buf:
-                self.reset(pyuv.UV_READABLE)
+            # parse http request
+            request, headers = headers.split("\r\n", 1)
+            headers, content = headers.split("\r\n\r\n", 1)
 
-    def io_cb(self, watcher, revents, error):
-        if error is not None:
-            logging.error("Error in connection: %d: %s" % (error, pyuv.errno.strerror(error)))
-            return
-        if revents & pyuv.UV_READABLE:
-            self.handle_read()
-        elif revents & pyuv.UV_WRITABLE:
-            self.handle_write()
+            method, url, version = request.split()
 
-    def close(self):
-        self.watcher.stop()
-        self.watcher = None
-        self.sock.close()
-        logging.debug("{0}: closed".format(self))
+            headers_map = {}
+            fields = headers.split("\r\n")
+            for field in fields:
+                key, val = field.split(':')
+                headers_map[key] = val
 
+            # interpret requests and forward
 
-class Server(object):
-
-    def __init__(self, address):
-        self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(address)
-        self.sock.setblocking(0)
-        self.address = self.sock.getsockname()
-        self.loop = pyuv.Loop.default_loop()
-        self.poll_watcher = pyuv.Poll(self.loop, self.sock.fileno())
-        self.async = pyuv.Async(self.loop, self.async_cb)
-        self.conns = weakref.WeakValueDictionary()
-        self.signal_watchers = set()
-
-    def handle_error(self, msg, level=logging.ERROR, exc_info=True):
-        logging.log(level, "{0}: {1} --> stopping".format(self, msg), exc_info=exc_info)
-        self.stop()
-
-    def signal_cb(self, handle, signum):
-        self.async.send()
-
-    def async_cb(self, handle):
-        handle.close()
-        self.stop()
-
-    def io_cb(self, watcher, revents, error):
-        try:
-            while True:
-                try:
-                    sock, address = self.sock.accept()
-                except socket.error as err:
-                    if err.args[0] in NONBLOCKING:
-                        break
+            # default port
+            port = "80"
+            rHTTP = re.compile("http://(.*?)(:(\\d+))?(/.*)", ASCII)
+            m = rHTTP.match(url)
+            if m.group(0) != "":
+                server = m.group(1)
+                if m.group(2) != "":
+                    port = m.group(3)
+                new_url = m.group(4)
+                if server == "video.pku.edu.cn":
+                    if www_ip is None:
+                        server = query_name("\005video\003pku\003edu\002cn")
                     else:
-                        raise
+                        server = www_ip
                 else:
-                    self.conns[address] = Connection(sock, address, self.loop)
-        except Exception:
-            self.handle_error("error accepting a connection")
+                    server = socket.gethostbyname(server)
+            elif server is None and headers_map["Host"].empty() and method != "CONNECT":
+                logger.debug("Reverse proxy for {0}".format(client))
+                new_url = url
+                if www_ip is None:
+                    server = query_name("\005video\003pku\003edu\002cn")
+                else:
+                    server = www_ip
+            else:
+                logger.debug("Can't parse URL")
+                return
 
-    def start(self):
-        self.sock.listen(socket.SOMAXCONN)
-        self.poll_watcher.start(pyuv.UV_READABLE, self.io_cb)
-        for sig in STOPSIGNALS:
-            handle = pyuv.Signal(self.loop)
-            handle.start(self.signal_cb, sig)
-            self.signal_watchers.add(handle)
-        logging.debug("{0}: started on {0.address}".format(self))
-        self.loop.run()
-        logging.debug("{0}: stopped".format(self))
+            # just in case of sites other than video.pku.edu.cn
+            # if resolved by query_name already, nothing changes
+            check_video_requests(new_url)
 
-    def stop(self):
-        self.poll_watcher.stop()
-        for watcher in self.signal_watchers:
-            watcher.stop()
-        self.signal_watchers.clear()
-        self.sock.close()
-        for conn in self.conns.values():
-            conn.close()
-        logging.debug("{0}: stopping".format(self))
+            start_connect_server(client, method, url, version) # TODO
+    else:
+        logger.debug("{0}: close connect from {1}".format(error, client))
+        client.close()
+        clients.remove(client)
+        return
+    client.write(data)
+
+# note: qname is converted name to query
+def query_name(qname):
+    packet = struct.pack(">H", 1234)   # arbitary chosen id
+    packet += struct.pack(">H", 0)     # flags
+    packet += struct.pack(">H", 1)     # queries
+    packet += struct.pack(">H", 0)     # ans
+    packet += struct.pack(">H", 0)     # auth
+    packet += struct.pack(">H", 0)     # add
+    packet += struct.pack(">s", qname) # qname
+    packet += struct.pack("B", 0)      # end of qname
+    packet += struct.pack(">H", 1)     # query type
+    packet += struct.pack(">H", 1)     # query class
+    dns_udp = pyuv.UDP(loop)
+
+def signal_cb(handle, signum):
+    [c.close() for c in clients]
+    signal_h.close()
+    proxy.close()
+    logger.debug("{0}: stopping".format(proxy))
 
 # default update_alpha for EWMA estimate
 update_alpha = 1.0
 
 if __name__ == "__main__":
-    if len(sys.argv) is not 7 or 8:
+    if len(sys.argv) != 7 or len(sys.argv) != 8:
         print('Usage: ', sys.argv[0], ' <log> <alpha> <listen-port> <fake-ip> <dns-ip> <dns-port> [<www-ip>].')
         sys.exit(1)
 
@@ -159,7 +134,19 @@ if __name__ == "__main__":
     dns_ip = sys.argv[5]
     dns_port = int(sys.argv[6])
 
-    if len(sys.argv) is 8:
+    # set optional content server
+    if len(sys.argv) == 8:
         www_ip = sys.argv[7]
-    server = Server(("127.0.0.1", port))
-    server.start()
+
+    loop = pyuv.Loop.default_loop()
+    clients = []
+
+    proxy = pyuv.TCP(loop)
+    proxy.bind(("127.0.0.1", port))
+    proxy.listen(on_client_connection)
+    logger.debug("{0}: ready".format(proxy))
+
+    signal_h = pyuv.Signal(loop)
+    signal_h.start(signal_cb, signal.SIGINT)
+
+    loop.run()
