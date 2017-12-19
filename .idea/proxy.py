@@ -6,6 +6,8 @@ import signal
 import logging
 import pyuv
 import re
+import struct
+from netaddr import IPAddress
 
 logging.basicConfig(level=logging.DEBUG)
 STOPSIGNALS = (signal.SIGINT, signal.SIGTERM)
@@ -64,6 +66,7 @@ def on_client_read(client, data, error):
                     else:
                         server = www_ip
                 else:
+                    # just in case of sites other than video.pku.edu.cn
                     server = socket.gethostbyname(server)
             elif server is None and headers_map["Host"].empty() and method != "CONNECT":
                 logger.debug("Reverse proxy for {0}".format(client))
@@ -76,11 +79,11 @@ def on_client_read(client, data, error):
                 logger.debug("Can't parse URL")
                 return
 
-            # just in case of sites other than video.pku.edu.cn
-            # if resolved by query_name already, nothing changes
-            check_video_requests(new_url)
-
-            start_connect_server(client, method, url, version) # TODO
+            if server is None:
+                logging.debug("Can't resolve domain name")
+            else:
+                file_property = check_video_requests(new_url)
+                start_connect_server(client, method, url, version) # TODO
     else:
         logger.debug("{0}: close connect from {1}".format(error, client))
         client.close()
@@ -90,23 +93,68 @@ def on_client_read(client, data, error):
 
 # note: qname is converted name to query
 def query_name(qname):
-    packet = struct.pack(">H", 1234)   # arbitary chosen id
-    packet += struct.pack(">H", 0)     # flags
-    packet += struct.pack(">H", 1)     # queries
-    packet += struct.pack(">H", 0)     # ans
-    packet += struct.pack(">H", 0)     # auth
-    packet += struct.pack(">H", 0)     # add
-    packet += struct.pack(">s", qname) # qname
-    packet += struct.pack("B", 0)      # end of qname
-    packet += struct.pack(">H", 1)     # query type
-    packet += struct.pack(">H", 1)     # query class
-    dns_udp = pyuv.UDP(loop)
+    packet = struct.pack(">H", 1234)        # arbitary chosen id
+    packet += struct.pack(">H", 0)          # flags
+    packet += struct.pack(">H", 1)          # queries
+    packet += struct.pack(">H", 0)          # ans
+    packet += struct.pack(">H", 0)          # auth
+    packet += struct.pack(">H", 0)          # add
+    for c in bytes(qname):                  # qname
+        packet += struct.pack("c", c)
+    packet += struct.pack("B", 0)           # end of qname
+    packet += struct.pack(">H", 1)          # query type
+    packet += struct.pack(">H", 1)          # query class
+    dns_local = pyuv.UDP(loop)
+    dns_local.bind('', 0)
+    dns_local.send((dns_ip, dns_port), packet)
+    ans_ip = start_recv(handle_dns_response)
+    return ans_ip
+
+def handle_dns_response(udp_handle, (ip, port), flags, data, error):
+    if error:
+        logging.debug("{0}".format(error))
+        return None
+    else:
+        ip_bytes = data[46:50]
+        ans_ip = str(netaddr.IPAddress(int.from_bytes(ip_bytes, byteorder='big')))
+        logging.debug("Get content server IP {0} from DNS".format(ans_ip))
+        return ans_ip
+
+def check_video_requests(uri):
+    rURI = re.compile("((.*?)((([^/]*)\\.f4m)|((\\d+)Seg(\\d+)-Frag(\\d+))))")
+    m = re.match(uri)
+    res = file_property();
+    if (m.group(0)):
+        res.path = m.group(1)
+        if m.group(2) != "":
+            if m.group(3) != "":
+                res.ismeta = True
+                res.metaname = m.group(3)
+                if m.group(3) == "big_buck_bunny.f4m":
+                    res.isbigbuck = True
+                elif m.group(3) == "big_buck_bunney_nolist.f4m":
+                    res.ismeta = False
+                    res.isbigbuck = False
+            elif m.group(5) != "":
+                res.ischunk = True
+                res.seg = m.group(7)
+                res.seg = m.group(8)
+        return file_property
+
 
 def signal_cb(handle, signum):
     [c.close() for c in clients]
     signal_h.close()
     proxy.close()
     logger.debug("{0}: stopping".format(proxy))
+
+class file_property:
+    def __init__(self, path="",
+                 ismeta=False, metaname="", isbigbuck=False,
+                 ischunk=False, seg="", frag=""):
+        self.path = path
+        self.ismeta, self.metaname, self.isbigbuck = ismeta, metaname, isbigbuck
+        self.ischunk, self.seg, self.frag = ischunk, seg, frag
 
 # default update_alpha for EWMA estimate
 update_alpha = 1.0
