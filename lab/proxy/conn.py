@@ -24,11 +24,8 @@ class Connection:
         self.stat = stat
 
     async def forwarding(self, breader, bwriter):
-        data = await breader.read(8192)
+        data = await breader.read()
         request_message = data.decode()
-        while len(data) != 0:
-            data = await breader.read(8192)
-            request_message += data.decode()
 
         logging.debug("Receiving data from browser")
         request, rest = request_message.split('\r\n', 1)
@@ -57,20 +54,18 @@ class Connection:
         logging.debug("Sending request of {} to server {}:{}".format(uri, remote_addr, remote_port))
         start_time = datetime.datetime.now()
         swriter.write(new_request.encode())
-        data = await sreader.read(8192)
-        response = b''
-        while len(data) != 0:
-            response += data
-            bwriter.write(data)
-            await bwriter.drain()
-            logging.debug("{} data sent to browser".format(len(data)))
-            data = await sreader.read(8192)
+        data = await sreader.read()
+        logging.debug("{} bytes data received from server".format(len(data)))
 
-        response = response.decode()
+        response = data.decode()
         response_line, _ = response.split('\r\n', 1)
         finish_time = datetime.datetime.now()
         header, content = response.split('\r\n\r\n', 1)
         logging.debug("Receiving response of {} from server {}:{}".format(response_line, remote_addr, remote_port))
+
+        bwriter.write(data)
+        await bwriter.drain()
+        logging.debug("{} bytes data sent to browser".format(len(data)))
 
 
         # stat chunk fetching
@@ -94,12 +89,8 @@ class Connection:
             uri = file_property.path + "big_buck_bunny.f4m"
             new_request = method + ' ' + uri + ' ' + version + '\r\n\r\n'
             swriter.write(new_request.encode())
-            data = await sreader.read(8192)
-            response = b''
-            while len(data) != 0:
-                response += data
-                data = await sreader.read(8192)
-            response = response.decode()
+            data = await sreader.read()
+            response = data.decode()
             _, xml_str = response.split('\r\n\r\n', 1)
             self.stat.parse_bitrates(xml_str)
 
