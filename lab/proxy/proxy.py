@@ -41,7 +41,7 @@ def main():
     conn = Connection(loop, config, stat)
     addr = config['listen_addr']
     port = int(config['listen_port'])
-    coro = asyncio.start_server(conn.forwarding, addr, port, loop)
+    coro = asyncio.start_server(conn.forwarding, addr, port, loop=loop)
     server = loop.run_until_complete(coro)
 
     logging.debug('Listening on {}'.format(server.sockets[0].getsockname()))
