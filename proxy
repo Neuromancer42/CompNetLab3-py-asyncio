@@ -113,16 +113,17 @@ async def forwarding(breader, bwriter):
     data = await sreader.read(8192)
     size = len(data)
     bwriter.write(data)
+    logging.debug("data chunk size {}".format(len(data)))
     while len(sreader._buffer) > 0:
         data = await sreader.read(8192)
         size += len(data)
         bwriter.write(data)
+        logging.debug("data chunk size {}".format(len(data)))
     await bwriter.drain()
 
     finish_time = datetime.datetime.now()
-    logging.debug("Receiving {} bytes of response from server {}:{}".format(size, remote_addr, remote_port))
+    logging.debug("Forwarding {} bytes of response from server {}:{}".format(size, remote_addr, remote_port))
 
-    logging.debug("{} bytes data sent to browser".format(len(data)))
 
     # close both sockets
     swriter.close()
