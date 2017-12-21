@@ -29,9 +29,8 @@ class Connection:
         while len(data) != 0:
             data = await breader.read(8192)
             request_message += data.decode()
-        logging.info(
-            "Receiving request from {} with size {}".format(breader, len(request_message)))
 
+        logging.debug("Receiving data from browser")
         request, rest = request_message.split('\r\n', 1)
         headers, content = rest.split('\r\n\r\n', 1)
         header_fields = headers.split('\r\n')
@@ -46,6 +45,7 @@ class Connection:
 
         method, url, version = request.split()
         remote_addr, remote_port, uri, file_property, chosen_rate = await self.modify_url(url, host)
+        logging.debug("check request property".format(file_property))
 
         new_request = method + ' ' + uri + ' ' + version
         new_request += '\r\n'
@@ -56,18 +56,22 @@ class Connection:
         sreader, swriter = await asyncio.open_connection(remote_addr, int(remote_port), loop=self.loop)
         logging.debug("Sending request of {} to server {}:{}".format(uri, remote_addr, remote_port))
         start_time = datetime.datetime.now()
-        swriter.write(content.encode())
+        swriter.write(new_request.encode())
         data = await sreader.read(8192)
-        response = ''
+        response = b''
         while len(data) != 0:
-            response += data.decode()
+            response += data
             bwriter.write(data)
             data = await sreader.read(8192)
 
+        response = response.decode()
         response_line, _ = response.split('\r\n', 1)
         finish_time = datetime.datetime.now()
         header, content = response.split('\r\n\r\n', 1)
         logging.debug("Receiving response of {} from server {}:{}".format(response_line, remote_addr, remote_port))
+        bwriter.write(response.encode())
+        await bwriter.drain()
+        logging.debug("browser forwarding complete")
 
         # stat chunk fetching
         if file_property.is_chunk:
@@ -91,10 +95,11 @@ class Connection:
             new_request = method + ' ' + uri + ' ' + version + '\r\n\r\n'
             swriter.write(new_request.encode())
             data = await sreader.read(8192)
-            response = ''
+            response = b''
             while len(data) != 0:
-                response += data.decode()
+                response += data
                 data = await sreader.read(8192)
+            response = response.decode()
             _, xml_str = response.split('\r\n\r\n', 1)
             self.stat.parse_bitrates(xml_str)
 
@@ -107,7 +112,7 @@ class Connection:
         logging.debug("modifying host {} and url: {}".format(host, url))
         # parse out server_name, port and uri
         server_name = "video.pku.edu.cn"
-        port = "80"
+        port = "8080"
 
         r_http = re.compile("(http://(.*?)(:(\\d+))?)?(/.*)")
         m_http = r_http.match(url)
