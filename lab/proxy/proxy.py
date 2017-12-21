@@ -29,7 +29,7 @@ def main():
     config['fake_ip'] = sys.argv[4]
 
     # set dns
-    config['dns_addr'] = sys.argv[5]
+    config['dns_ip'] = sys.argv[5]
     config['dns_port'] = sys.argv[6]
 
     # set optional content server

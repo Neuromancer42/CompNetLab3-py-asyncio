@@ -37,7 +37,7 @@ class Connection:
         header_fields = headers.split('\r\n')
         header_map = {}
         for field in header_fields:
-            key, value = field.split(':')
+            key, value = field.split(':', 1)
             header_map[key] = value.strip().rstrip()
         if "Host" in header_map:
             host = header_map["Host"]
@@ -185,7 +185,7 @@ class Connection:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((self.config['fake_ip'], 0))
         dns_server = (self.config['dns_ip'], int(self.config['dns_port']))
-        sock.sendto(dns_request.get_wire(), dns_server)
+        sock.sendto(dns_request.to_wire(), dns_server)
         data = sock.recv(1024)
 
         dns_response = dns.message.from_wire(data)
