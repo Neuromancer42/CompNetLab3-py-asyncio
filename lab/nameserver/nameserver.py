@@ -87,7 +87,7 @@ class Server:
             else:
                 record[sender] = (seq, neighbours)
         for sender in record:
-            record[sender] = record[sender][1].split(',').strip().rstrip()
+            record[sender] = record[sender][1].strip().rstrip().split(',')
 
         nearest = {}
         for content in self.servers:
