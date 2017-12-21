@@ -28,17 +28,23 @@ class Connection:
         request_message = data.decode()
 
         logging.debug("Receiving data from browser")
-        request, rest = request_message.split('\r\n', 1)
-        headers, content = rest.split('\r\n\r\n', 1)
-        header_fields = headers.split('\r\n')
-        header_map = {}
-        for field in header_fields:
-            key, value = field.split(':', 1)
-            header_map[key] = value.strip().rstrip()
-        if "Host" in header_map:
-            host = header_map["Host"]
+        if '\r\n' in request_message:
+            request, rest = request_message.split('\r\n', 1)
         else:
-            host = None
+            request = request_message
+            rest = ''
+        header_map = {}
+        content = ''
+        headers = ''
+        host = None
+        if len(rest) > 0:
+            headers, content = rest.split('\r\n\r\n', 1)
+            header_fields = headers.split('\r\n')
+            for field in header_fields:
+                key, value = field.split(':', 1)
+                header_map[key] = value.strip().rstrip()
+            if "Host" in header_map:
+                host = header_map["Host"]
 
         method, url, version = request.split()
         remote_addr, remote_port, uri, file_property, chosen_rate = await self.modify_url(url, host)
