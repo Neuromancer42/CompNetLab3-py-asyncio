@@ -60,14 +60,8 @@ if len(sys.argv) == 8:
 
 
 def forwarding(sock, addr):
-    data = b''
-    while True:
-        d = sock.recv(8192)
-        if d:
-            data += d
-        else:
-            break
-
+    logging.debug("forwarding for {}".format(addr))
+    data = sock.recv(8192)
     request_message = data.decode()
     if len(request_message) == 0:
         return
@@ -112,7 +106,7 @@ def forwarding(sock, addr):
     while True:
         d = remote_sock.recv(8192)
         if d:
-            logging.debug("data chunk size{}".format(len(d)))
+            logging.debug("data chunk size {}".format(len(d)))
             length += len(d)
             sock.send(d)
         else:
@@ -269,10 +263,9 @@ def parse_bitrates(xml_str):
                 logging.error("Error: no bitrate attribution")
             else:
                 new_rates.append(int(child.attrib['bitrate']))
-    logging.debug("Parse bitrates: waiting for writelock")
     global rates
     rates = new_rates
-    logging.debug("Stat: record available bitrates: ".format(rates))
+    logging.debug("Stat: {} available bitrates".format(len(rates)))
 
 
 def update_throughput(throuput, ip):
@@ -285,10 +278,7 @@ def update_throughput(throuput, ip):
     return throughput_map[ip]
 
 
-addr = config['listen_addr']
-port = int(config['listen_port'])
-
-
+# prefetch metafiles
 logging.debug("fetch true metafile")
 s = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
 addr = query_name("video.pku.edu.cn")
@@ -311,11 +301,15 @@ _, xml_str = response.split('\r\n\r\n', 1)
 parse_bitrates(xml_str)
 s.close()
 
+
+# starting proxy
+addr = config['listen_addr']
+port = int(config['listen_port'])
 s = socket.socket(family=socket.AF_INET, type = socket.SOCK_STREAM)
 s.bind((addr, port))
-s.listen(4)
+s.listen(8)
 
-logging.debug('Proxy listening on port {}'.format(port))
+logging.debug('Proxy listening on {}'.format(s.getsockname()))
 
 while True:
     sock, addr = s.accept()
