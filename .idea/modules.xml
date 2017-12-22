@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/pyuv-proxy.iml" filepath="$PROJECT_DIR$/.idea/pyuv-proxy.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/pyproxy.iml" filepath="$PROJECT_DIR$/.idea/pyproxy.iml" />
     </modules>
   </component>
 </project>
