@@ -1,13 +1,13 @@
 import sys
 import logging
 import asyncio
-from stat import Statistics
-from conn import Connection
+from .stat import Statistics
+from .conn import Connection
 
 logging.basicConfig(level=logging.DEBUG)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 7 or len(sys.argv) != 8:
+    if len(sys.argv) != 7 and len(sys.argv) != 8:
         print('Usage: ', sys.argv[0], ' <log> <alpha> <listen-port> <fake-ip> <dns-ip> <dns-port> [<www-ip>].')
         sys.exit(1)
 

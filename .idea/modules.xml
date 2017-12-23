@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/pyproxy.iml" filepath="$PROJECT_DIR$/.idea/pyproxy.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../CompNetLab3-py-asyncio/.idea/CompNetLab3-py-asyncio.iml" filepath="$PROJECT_DIR$/../CompNetLab3-py-asyncio/.idea/CompNetLab3-py-asyncio.iml" />
     </modules>
   </component>
 </project>

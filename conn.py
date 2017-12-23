@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import re
-import dns
+import dns.message
 import aiodns
 import aioudp
 import datetime
+import struct
+import socket
 
 
 class FileProperty:
@@ -177,8 +179,8 @@ class Connection:
         return server_addr, port, new_uri, file_property, rate
 
     async def query_name(self, qname):
-        dns_request = dns.renderer.Renderer(id=1, flags=0)
-        dns_request.add_question(qname=qname, rdtype=dns.rdatatype.A, rdclass=dns.rdataclass.IN)
+        dns_request = dns.message.make_query(qname, dns.rdatatype.A, rdclass=dns.rdataclass.IN)
+
         # Dangerous: using blocking I/O
         # try:
         #     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -193,17 +195,21 @@ class Connection:
         # change to asyncio, need test
         local = await aioudp.open_local_endpoint(host=self.config["fake_ip"])
         remote = await aioudp.open_remote_endpoint(host=self.config["dns_ip"], port=int(self.config["dns_port"]))
-        remote.write(bytes(dns_request))
-        data = await local.read()
+        remote.write(dns_request.to_wire())
 
-        dns_response = dns.message.from_wire(data.decode())
-        ans_ipset = dns_response.find_rrset(dns_response.answer,
-                                            dns.name.from_text('video.pku.edu.cn'),
-                                            rdtype=dns.rdatatype.A,
-                                            rdclass=dns.rdataclass.IN)
-        if len(ans_ipset) > 0:
-            for ans_ip in ans_ipset:
-                return ans_ip
-        else:
-            logging.error("Name query gets no answer")
+        data = await local.read()
+        try:
+            dns_response = dns.message.from_wire(data.decode())
+            ans_ipset = dns_response.get_rrset(dns_response.answer,
+                                               dns.name.from_text('video.pku.edu.cn'),
+                                               rdtype=dns.rdatatype.A,
+                                               rdclass=dns.rdataclass.IN)
+            if ans_ipset:
+                for ans_ip in ans_ipset:
+                    return socket.inet_ntoa(struct.pack("!I", ans_ip))
+            else:
+                logging.error("Name query gets no answer")
+                return None
+        except Exception as e:
+            logging.error("Error in pasrsing DNS response: {}".format(e))
             return None
