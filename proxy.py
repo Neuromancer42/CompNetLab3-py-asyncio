@@ -1,23 +1,10 @@
-from __future__ import print_function
-
 import sys
-import signal
 import logging
+import asyncio
+from stat import Statistics
+from conn import Connection
 
 logging.basicConfig(level=logging.DEBUG)
-STOPSIGNALS = (signal.SIGINT, signal.SIGTERM)
-NONBLOCKING = (errno.EAGAIN, errno.EWOULDBLOCK)
-if sys.platform == "win32":
-    NONBLOCKING = NONBLOCKING + (errno.WSAEWOULDBLOCK,)
-
-
-def start_connect_server(client, method, version, server, new_url, headers, data, file_property):
-    # TODO
-    skip
-
-
-# default update_alpha for EWMA estimate
-update_alpha = 1.0
 
 if __name__ == "__main__":
     if len(sys.argv) != 7 or len(sys.argv) != 8:
@@ -29,12 +16,14 @@ if __name__ == "__main__":
     logfile.setLevel(logging.CRITICAL)
     logging.getLogger('').addHandler(logfile)
 
+    config = dict()
+
     # set update-alpha for EWMA esitmate
     config['update_alpha'] = float(sys.argv[2])
 
     # set listen-port
     config['listen_port'] = sys.argv[3]
-    config['listen_addr'] = "127.0.0.1"
+    config['listen_addr'] = "0.0.0.0"
 
     # set fake-ip
     config['fake_ip'] = sys.argv[4]
@@ -46,3 +35,22 @@ if __name__ == "__main__":
     # set optional content server
     if len(sys.argv) == 8:
         config['www_ip'] = sys.argv[7]
+
+    loop = asyncio.get_event_loop()
+    stat = Statistics(loop, config['update_alpha'])
+    conn = Connection(loop, config, stat)
+    addr = config['listen_addr']
+    port = int(config['listen_port'])
+    coro = asyncio.start_server(conn.forwarding, addr, port, loop)
+    server = loop.run_until_complete(coro)
+
+    logging.debug('Listening on {}'.format(server.sockets[0].getsockname()))
+
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+
+    logging.debug('Shutdown server')
+    server.close()
+    loop.run_until_complete(server.wait_closed())
