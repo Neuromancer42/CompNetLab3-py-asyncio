@@ -4,9 +4,9 @@ import asyncio
 from lab.proxy.stat import Statistics
 from lab.proxy.conn import Connection
 
-logging.basicConfig(level=logging.DEBUG)
+def main():
+    logging.basicConfig(level=logging.DEBUG)
 
-if __name__ == "__main__":
     if len(sys.argv) != 7 and len(sys.argv) != 8:
         print('Usage: ', sys.argv[0], ' <log> <alpha> <listen-port> <fake-ip> <dns-ip> <dns-port> [<www-ip>].')
         sys.exit(1)

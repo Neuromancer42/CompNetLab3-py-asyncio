@@ -5,8 +5,6 @@ import logging
 import sys
 import datetime
 
-logging.basicConfig(level=logging.DEBUG)
-
 
 class Server:
     def __init__(self, config):
@@ -60,7 +58,6 @@ class Server:
         else:
             logging.error("Receiving wrong query")
 
-    @staticmethod
     def read_servers(self, filename):
         file = open(filename, 'r')
         lines = file.readlines()
@@ -127,17 +124,19 @@ class Server:
                 return self.content_map[k]
 
 
-if __name__ == "__main__":
+def main():
+    logging.basicConfig(level=logging.DEBUG)
+
     argc = len(sys.argv)
     config = dict()
     if argc != 6 and argc != 7:
-        print('Usage: ', sys.argv[0], ' [-r] <log> <ip> <port> <servers> <servers>.')
+        print('Usage: ', sys.argv[0], ' [-r] <log> <ip> <port> <servers> <lsa>.')
         sys.exit(1)
     if argc == 6:
         config['mode'] = 'lsa'
     else:
         if sys.argv[1] != '-r':
-            print('Usage: ', sys.argv[0], ' [-r] <log> <ip> <port> <servers> <servers>.')
+            print('Usage: ', sys.argv[0], ' [-r] <log> <ip> <port> <servers> <lsa>.')
             sys.exit(1)
         else:
             config['mode'] = 'roundrobin'
