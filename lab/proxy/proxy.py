@@ -1,8 +1,8 @@
 import sys
 import logging
 import asyncio
-from .stat import Statistics
-from .conn import Connection
+from lab.proxy.stat import Statistics
+from lab.proxy.conn import Connection
 
 logging.basicConfig(level=logging.DEBUG)
 

@@ -3,7 +3,7 @@ import logging
 import re
 import dns.message
 import aiodns
-import aioudp
+from lab import aioudp
 import datetime
 import struct
 import socket

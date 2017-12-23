@@ -1,6 +1,6 @@
 import asyncio
 import dns.message
-import aioudp
+from lab import aioudp
 import logging
 import sys
 import datetime
