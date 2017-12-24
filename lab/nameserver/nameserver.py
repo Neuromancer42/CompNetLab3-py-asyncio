@@ -13,9 +13,11 @@ class Server:
     def __init__(self, config):
         self.cur_server = 0
         self.servers = self.read_servers(config['server_file'])
+        logging.debug("Find servers: {}".format(self.servers))
         self.mode = config['mode']
         if self.mode == 'lsa':
             self.content_map = self.read_lsa(config['lsa_file'])
+            logging.debug("calculate shortest servers: {}".format(self.content_map))
         else:
             self.content_map = dict()
         self.addr = config['listen_addr']
@@ -97,10 +99,11 @@ class Server:
             reverse_dist[content] = 0
             while len(to_expand) > 0:
                 d, m = to_expand.pop(0)
-                for n in record[m]:
-                    if n not in reverse_dist:
-                        reverse_dist[n] = d + 1
-                        to_expand.append((d + 1, n))
+                if m in record:
+                    for n in record[m]:
+                        if n not in reverse_dist:
+                            reverse_dist[n] = d + 1
+                            to_expand.append((d + 1, n))
 
             for p in reverse_dist:
                 if p in nearest:
