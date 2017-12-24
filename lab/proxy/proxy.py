@@ -50,9 +50,8 @@ def main():
         loop.run_forever()
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        raise e
 
     logging.debug('Shutdown server')
     server.close()
     loop.run_until_complete(server.wait_closed())
+    loop.close()
