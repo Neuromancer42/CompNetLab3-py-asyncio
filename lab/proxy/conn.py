@@ -27,7 +27,7 @@ class Connection:
         data = await breader.read()
         request_message = data.decode()
 
-        logging.debug("Receiving data from browser")
+        logging.debug("Receiving {} data from browser".len(data))
         if '\r\n' in request_message:
             request, rest = request_message.split('\r\n', 1)
         else:
