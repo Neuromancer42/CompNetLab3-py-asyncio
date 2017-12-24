@@ -104,7 +104,7 @@ class Connection:
         logging.debug("Remote socket and Client socket closed")
 
     async def modify_url(self, url, host):
-
+        logging.debug("modifying host {} and url: {}".format(host, url))
         # parse out server_name, port and uri
         server_name = "video.pku.edu.cn"
         port = "80"
