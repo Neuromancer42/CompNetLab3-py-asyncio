@@ -62,6 +62,8 @@ class Connection:
         while len(data) != 0:
             response += data
             bwriter.write(data)
+            await bwriter.drain()
+            logging.debug("{} data sent to browser".format(len(data)))
             data = await sreader.read(8192)
 
         response = response.decode()
@@ -69,9 +71,7 @@ class Connection:
         finish_time = datetime.datetime.now()
         header, content = response.split('\r\n\r\n', 1)
         logging.debug("Receiving response of {} from server {}:{}".format(response_line, remote_addr, remote_port))
-        bwriter.write(response.encode())
-        await bwriter.drain()
-        logging.debug("browser forwarding complete")
+
 
         # stat chunk fetching
         if file_property.is_chunk:
