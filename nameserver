@@ -1,3 +1,5 @@
+#!/usr/local/bin/python3
+
 from lab.nameserver import nameserver
 
 if __name__ == "__main__":
