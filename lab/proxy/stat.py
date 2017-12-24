@@ -11,6 +11,7 @@ class Statistics:
         self.alpha = alpha
 
     async def adapt_bitrate(self, ip):
+        logging.debug("Adapt bitrate: waiting for readlock")
         async with self.rwlock.reader:
             if ip in self.throughput_map:
                 cur_throughput = self.throughput_map[ip]
@@ -47,11 +48,13 @@ class Statistics:
                     logging.error("Error: no bitrate attribution")
                 else:
                     rates.append(int(child.attrib['bitrate']))
+        logging.debug("Parse bitrates: waiting for writelock")
         async with self.rwlock.writer:
             self.rates = rates
             logging.debug("Stat: record available bitrates: ".format(rates))
 
     async def update_throughput(self, throuput, ip):
+        logging.debug("Update throughput: waiting for writelock")
         async with self.rwlock.writer:
             if ip in self.throughput_map:
                 self.throughput_map[ip] = self.alpha * throuput + (1 - self.alpha) * self.throughput_map[ip]
