@@ -1,9 +1,12 @@
-import asyncio
+import dns
 import dns.message
-from lab import aioudp
+import dns.name
+import dns.rdatatype
+import dns.rdataclass
 import logging
 import sys
 import datetime
+import socket
 
 
 class Server:
@@ -17,46 +20,50 @@ class Server:
             self.content_map = dict()
         self.addr = config['listen_addr']
         self.port = int(config['listen_port'])
-        self.servers = []
+        self.socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
-    async def run(self):
-        local = await aioudp.open_remote_endpoint(host=self.addr,
-                                                  port=self.port)
-        while True:
-            await self.process(local)
+    def run(self):
+        self.socket.bind((self.addr, self.port))
+        logging.debug("Bind UDP on {}:{}".format(self.addr, self.port))
+        try:
+            while True:
+                self.process()
+        except Exception as e:
+            # logging.debug("Error: {}".format(e))
+            self.socket.close()
+            raise e
 
-    async def process(self, local):
-        data, addr = await local.read()
-        request_packet = data.decode()
+    def process(self):
+        request_packet, addr = self.socket.recvfrom(1024)
         request = dns.message.from_wire(request_packet)
         questions = request.get_rrset(section=request.question,
-                                      name="video.pku.edu.cn",
+                                      name=dns.name.from_text("video.pku.edu.cn"),
                                       rdclass=dns.rdataclass.IN,
                                       rdtype=dns.rdatatype.A)
-        if questions:
-            for q in questions:
-                qname = q.name
-                if qname != "video.pku.edu.cn":
-                    logging.error("Receiving wrong query")
-                    break
+        if questions is not None:
+            qname = questions.name
+            if qname != dns.name.from_text("video.pku.edu.cn"):
+                logging.error("Receiving wrong query")
+            else:
+                if self.mode == 'roundrobin':
+                    ans_ip = self.get_ip_rr(addr[0])
+                elif self.mode == 'lsa':
+                    ans_ip = self.get_ip_lsa(addr[0])
                 else:
-                    if self.mode == 'roundrobin':
-                        ans_ip = self.get_ip_rr(addr[0])
-                    elif self.mode == 'lsa':
-                        ans_ip = self.get_ip_lsa(addr[0])
-                    else:
-                        logging.error("Config is invalid")
-                        break
-                now = datetime.datetime.now() - datetime.datetime(year=1970, month=1, day=1,
+                    logging.error("Config is invalid")
+            now = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.datetime(year=1970, month=1, day=1,
                                                                   tzinfo=datetime.timezone.utc)
-                logging.critical("{} {} {} {}".format(now.total_seconds(), addr[0], qname, ans_ip))
-                response = dns.message.make_response(request, ans_ip)
-                client = await aioudp.open_local_endpoint(*addr)
-                client.write(response.to_wire())
-                # just need one answer
-                break
+            logging.critical("{} {} {} {}".format(now.total_seconds(), addr[0], "video.pku.edu.cn", ans_ip))
+            # ans_ip = struct.unpack("!I", socket.inet_aton(ans_ip))[0]
+            response = dns.message.make_response(request)
+            response.answer = [dns.rrset.from_text(qname,
+                                                  0,
+                                                  dns.rdataclass.IN,
+                                                  dns.rdatatype.A,
+                                                  ans_ip)]
+            self.socket.sendto(response.to_wire(), addr)
         else:
-            logging.error("Receiving wrong query")
+            logging.error("Receiving no questions")
 
     def read_servers(self, filename):
         file = open(filename, 'r')
@@ -156,9 +163,4 @@ def main():
 
     dns_server = Server(config)
 
-    loop = asyncio.get_event_loop()
-    # actually, it's blocking IO (shrug)
-    try:
-        loop.run_until_complete(dns_server.run())
-    finally:
-        loop.close()
+    dns_server.run()

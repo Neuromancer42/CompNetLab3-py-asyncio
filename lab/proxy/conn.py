@@ -3,7 +3,6 @@ import logging
 import re
 import dns.message
 import aiodns
-from lab import aioudp
 import datetime
 import struct
 import socket
@@ -151,7 +150,7 @@ class Connection:
             if 'www_ip' in self.config:
                 server_addr = self.config['www_ip']
             else:
-                server_addr = await self.query_name("video.pku.edu.cn")
+                server_addr = self.query_name("video.pku.edu.cn")
         else:
             resolver = aiodns.DNSResolver(loop=self.loop)
             try:
@@ -178,38 +177,25 @@ class Connection:
 
         return server_addr, port, new_uri, file_property, rate
 
-    async def query_name(self, qname):
-        dns_request = dns.message.make_query(qname, dns.rdatatype.A, rdclass=dns.rdataclass.IN)
+    def query_name(self, name):
+        qname = dns.name.from_text(name)
+        dns_request = dns.message.make_query(qname, rdtype=dns.rdatatype.A, rdclass=dns.rdataclass.IN)
 
         # Dangerous: using blocking I/O
-        # try:
-        #     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        #     sock.bind((self.config['fake_ip'], 0))
-        #     dns_server = (self.config['dns_ip'], int(self.config['dns_port']))
-        #     sock.sendto(bytes(dns_request.get_wire()), dns_server)
-        #     data = sock.recv(1024)
-        # except Exception as e:
-        #     logging.error("Network Error when qeurying name: {}".format(e))
-        #     return None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((self.config['fake_ip'], 0))
+        dns_server = (self.config['dns_ip'], int(self.config['dns_port']))
+        sock.sendto(dns_request.get_wire(), dns_server)
+        data = sock.recv(1024)
 
-        # change to asyncio, need test
-        local = await aioudp.open_local_endpoint(host=self.config["fake_ip"])
-        remote = await aioudp.open_remote_endpoint(host=self.config["dns_ip"], port=int(self.config["dns_port"]))
-        remote.write(dns_request.to_wire())
-
-        data = await local.read()
-        try:
-            dns_response = dns.message.from_wire(data.decode())
-            ans_ipset = dns_response.get_rrset(dns_response.answer,
-                                               dns.name.from_text('video.pku.edu.cn'),
-                                               rdtype=dns.rdatatype.A,
-                                               rdclass=dns.rdataclass.IN)
-            if ans_ipset:
-                for ans_ip in ans_ipset:
-                    return socket.inet_ntoa(struct.pack("!I", ans_ip))
-            else:
-                logging.error("Name query gets no answer")
-                return None
-        except Exception as e:
-            logging.error("Error in pasrsing DNS response: {}".format(e))
+        dns_response = dns.message.from_wire(data)
+        ans_ipset = dns_response.get_rrset(dns_response.answer,
+                                           dns.name.from_text('video.pku.edu.cn'),
+                                           rdtype=dns.rdatatype.A,
+                                           rdclass=dns.rdataclass.IN)
+        if ans_ipset:
+            for ans_ip in ans_ipset:
+                return str(ans_ip)
+        else:
+            logging.error("Name query gets no answer")
             return None
