@@ -30,7 +30,7 @@ class Connection:
             data = await breader.read(8192)
             request_message += data.decode()
         logging.info(
-            "Receiving request from {} with size {}".format(breader.get_extra_info('peername'), len(request_message)))
+            "Receiving request from {} with size {}".format(breader, len(request_message)))
 
         request, rest = request_message.split('\r\n', 1)
         headers, content = rest.split('\r\n\r\n', 1)
