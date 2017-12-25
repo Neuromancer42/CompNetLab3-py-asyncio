@@ -48,6 +48,7 @@ class Server:
             qname = questions.name
             if qname != dns.name.from_text("video.pku.edu.cn"):
                 logging.error("Receiving wrong query")
+                return
             else:
                 if self.mode == 'roundrobin':
                     ans_ip = self.get_ip_rr(addr[0])
@@ -55,7 +56,7 @@ class Server:
                     ans_ip = self.get_ip_lsa(addr[0])
                 else:
                     logging.error("Config is invalid")
-                    sys.exit(1)
+                    return
             now = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.datetime(year=1970, month=1, day=1,
                                                                   tzinfo=datetime.timezone.utc)
             logging.critical("{} {} {} {}".format(now.total_seconds(), addr[0], "video.pku.edu.cn", ans_ip))
