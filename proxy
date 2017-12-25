@@ -64,7 +64,7 @@ if len(sys.argv) == 8:
 
 
 async def forwarding(breader, bwriter):
-    data = await breader.read()
+    data = await breader.read(2000000)
     request_message = data.decode()
 
     logging.debug("Receiving {} data from browser".format(len(data)))
@@ -86,13 +86,18 @@ async def forwarding(breader, bwriter):
         if "Host" in header_map:
             host = header_map["Host"]
 
-    method, url, version = request.split()
+    try:
+        method, url, version = request.split()
+    except Exception as _:
+        logging.error("Invalid request line")
+        return
     remote_addr, remote_port, uri, file_property, chosen_rate = await modify_url(url, host)
     logging.debug("check request property".format(file_property))
 
     new_request = method + ' ' + uri + ' ' + version
     new_request += '\r\n'
     new_request += headers
+    new_request += 'Connection: close'   # inform the server to close immediately
     new_request += '\r\n\r\n'
     new_request += content
 
@@ -100,7 +105,7 @@ async def forwarding(breader, bwriter):
     logging.debug("Sending request of {} to server {}:{}".format(uri, remote_addr, remote_port))
     start_time = datetime.datetime.now()
     swriter.write(new_request.encode())
-    data = await sreader.read()
+    data = await sreader.read(2000000)
     logging.debug("{} bytes data received from server".format(len(data)))
 
     response = data.decode()
@@ -112,6 +117,10 @@ async def forwarding(breader, bwriter):
     bwriter.write(data)
     await bwriter.drain()
     logging.debug("{} bytes data sent to browser".format(len(data)))
+
+    # close both sockets
+    swriter.close()
+    bwriter.close()
 
     # stat chunk fetching
     if file_property.is_chunk:
@@ -131,17 +140,17 @@ async def forwarding(breader, bwriter):
                                                        uri))
     # fetching metafile
     if file_property.is_bigbuck:
+        sreader, swriter = await asyncio.open_connection(remote_addr, int(remote_port), loop=loop)
         uri = file_property.path + "big_buck_bunny.f4m"
         new_request = method + ' ' + uri + ' ' + version + '\r\n\r\n'
         swriter.write(new_request.encode())
-        data = await sreader.read()
+        data = await sreader.read(2000000)
         response = data.decode()
         _, xml_str = response.split('\r\n\r\n', 1)
         parse_bitrates(xml_str)
+        swriter.close()
 
     # close sockets
-    swriter.close()
-    bwriter.close()
     logging.debug("Remote socket and Client socket closed")
 
 
