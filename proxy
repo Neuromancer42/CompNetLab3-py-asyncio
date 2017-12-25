@@ -64,10 +64,13 @@ if len(sys.argv) == 8:
 
 
 async def forwarding(breader, bwriter):
-    data = await breader.read(2000000)
+    data = await breader.read(8192)
     request_message = data.decode()
+    while len(breader._buffer) > 0:
+        data = await breader.read(8192)
+        request_message += data.decode()
 
-    logging.debug("Receiving {} data from browser".format(len(data)))
+    logging.debug("Receiving {} data from browser".format(len(request_message)))
     if '\r\n' in request_message:
         request, rest = request_message.split('\r\n', 1)
     else:
@@ -88,9 +91,10 @@ async def forwarding(breader, bwriter):
 
     try:
         method, url, version = request.split()
-    except Exception as _:
-        logging.error("Invalid request line")
+    except Exception as e:
+        logging.error("Invalid request line: {}".format(e))
         return
+
     remote_addr, remote_port, uri, file_property, chosen_rate = await modify_url(url, host)
     logging.debug("check request property".format(file_property))
 
@@ -105,17 +109,19 @@ async def forwarding(breader, bwriter):
     logging.debug("Sending request of {} to server {}:{}".format(uri, remote_addr, remote_port))
     start_time = datetime.datetime.now()
     swriter.write(new_request.encode())
-    data = await sreader.read(2000000)
-    logging.debug("{} bytes data received from server".format(len(data)))
 
-    response = data.decode()
-    response_line, _ = response.split('\r\n', 1)
-    finish_time = datetime.datetime.now()
-    header, content = response.split('\r\n\r\n', 1)
-    logging.debug("Receiving response of {} from server {}:{}".format(response_line, remote_addr, remote_port))
-
+    data = await sreader.read(8192)
+    size = len(data)
     bwriter.write(data)
+    while len(sreader._buffer) > 0:
+        data = await sreader.read(8192)
+        size += len(data)
+        bwriter.write(data)
     await bwriter.drain()
+
+    finish_time = datetime.datetime.now()
+    logging.debug("Receiving {} bytes of response from server {}:{}".format(size, remote_addr, remote_port))
+
     logging.debug("{} bytes data sent to browser".format(len(data)))
 
     # close both sockets
@@ -126,7 +132,6 @@ async def forwarding(breader, bwriter):
     if file_property.is_chunk:
         now = finish_time - datetime.datetime(year=1970, month=1, day=1, tzinfo=datetime.timezone.utc)
         duration = finish_time - start_time
-        size = len(content)
         # size in bytes, duration in sec
         cur_throughput = size * 8 / 1000 / duration.total_seconds()
         new_throughout = await update_throughput(cur_throughput, remote_addr)
@@ -144,9 +149,16 @@ async def forwarding(breader, bwriter):
         uri = file_property.path + "big_buck_bunny.f4m"
         new_request = method + ' ' + uri + ' ' + version + '\r\n\r\n'
         swriter.write(new_request.encode())
-        data = await sreader.read(2000000)
+        data = await sreader.read(8192)
         response = data.decode()
-        _, xml_str = response.split('\r\n\r\n', 1)
+        while len(sreader._buffer) > 0:
+            data = await sreader.read(8192)
+            response += data.decode()
+        try:
+            _, xml_str = response.split('\r\n\r\n', 1)
+        except Exception as e:
+            logging.error("Error when parsing metafile: {}".format(e))
+            return
         parse_bitrates(xml_str)
         swriter.close()
 
