@@ -1,9 +1,8 @@
 #!/usr/local/bin/python3
 
 import sys
-import asyncio
-import aiodns
-import aiorwlock
+import socket
+import threading
 import logging
 import re
 import dns
@@ -12,7 +11,6 @@ import dns.rdata
 import dns.rdataclass
 import dns.rdatatype
 import datetime
-import socket
 import xml.etree.ElementTree
 
 
@@ -52,8 +50,6 @@ config['fake_ip'] = sys.argv[4]
 config['dns_ip'] = sys.argv[5]
 config['dns_port'] = sys.argv[6]
 
-loop = asyncio.get_event_loop()
-rwlock = aiorwlock.RWLock(loop=loop)
 rates = list()
 throughput_map = dict()
 alpha = config['update_alpha']
@@ -63,13 +59,16 @@ if len(sys.argv) == 8:
     config['www_ip'] = sys.argv[7]
 
 
-async def forwarding(breader, bwriter):
-    data = await breader.read(8192)
-    request_message = data.decode()
-    while len(breader._buffer) > 0:
-        data = await breader.read(8192)
-        request_message += data.decode()
+def forwarding(sock, addr):
+    data = b''
+    while True:
+        d = sock.recv(8192)
+        if d:
+            data += d
+        else:
+            break
 
+    request_message = data.decode()
     if len(request_message) == 0:
         return
 
@@ -94,7 +93,7 @@ async def forwarding(breader, bwriter):
 
     method, url, version = request.split()
 
-    remote_addr, remote_port, uri, file_property, chosen_rate = await modify_url(url, host)
+    remote_addr, remote_port, uri, file_property, chosen_rate = modify_url(url, host)
     logging.debug("check request property".format(file_property))
 
     new_request = method + ' ' + uri + ' ' + version
@@ -103,35 +102,29 @@ async def forwarding(breader, bwriter):
     new_request += '\r\n\r\n'
     new_request += content
 
-    sreader, swriter = await asyncio.open_connection(remote_addr, int(remote_port), loop=loop)
+    remote_sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+    remote_sock.connect((remote_addr, int(remote_port)))
     logging.debug("Sending request of {} to server {}:{}".format(uri, remote_addr, remote_port))
     start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-    swriter.write(new_request.encode())
+    remote_sock.send(new_request.encode())
 
-    data = await sreader.read(8192)
-    size = len(data)
-    bwriter.write(data)
-    logging.debug("data chunk size {}".format(len(data)))
-    while not sreader.at_eof():
-        data = await sreader.read(8192)
-        size += len(data)
-        bwriter.write(data)
-        logging.debug("data chunk size {}".format(len(data)))
-    await bwriter.drain()
-    
-    # data = await sreader.read()
-    # size = len(data)
-    # logging.debug("data chunk size {}".format(len(data)))
-    # bwriter.write(data)
-    # await bwriter.drain()
+    length = 0
+    while True:
+        d = remote_sock.recv(8192)
+        if d:
+            logging.debug("data chunk size{}".format(len(d)))
+            length += len(d)
+            sock.send(d)
+        else:
+            break
 
     finish_time = datetime.datetime.now(tz=datetime.timezone.utc)
-    logging.debug("Forwarding {} bytes of response from server {}:{}".format(size, remote_addr, remote_port))
+    logging.debug("Forwarding {} bytes of response from server {}:{}".format(length, remote_addr, remote_port))
 
     # close sockets
     logging.debug("Remote socket and Client socket closed")
-    swriter.close()
-    bwriter.close()
+    remote_sock.close()
+    sock.close()
 
     # stat chunk fetching
     if file_property.is_chunk:
@@ -139,8 +132,8 @@ async def forwarding(breader, bwriter):
         now = finish_time - datetime.datetime(year=1970, month=1, day=1, tzinfo=datetime.timezone.utc)
         duration = finish_time - start_time
         # size in bytes, duration in sec
-        cur_throughput = size * 8 / 1000 / duration.total_seconds()
-        new_throughout = await update_throughput(cur_throughput, remote_addr)
+        cur_throughput = length * 8 / 1000 / duration.total_seconds()
+        new_throughout = update_throughput(cur_throughput, remote_addr)
         # logging
         logging.critical("{} {} {} {} {} {} {}".format(now.total_seconds(),
                                                        duration.total_seconds(),
@@ -149,28 +142,9 @@ async def forwarding(breader, bwriter):
                                                        chosen_rate,
                                                        remote_addr,
                                                        uri))
-    # fetching metafile
-    if file_property.is_bigbuck:
-        logging.debug("fetch true metafile")
-        sreader, swriter = await asyncio.open_connection(remote_addr, int(remote_port), loop=loop)
-        uri = file_property.path + "big_buck_bunny.f4m"
-        new_request = 'GET' + ' ' + uri + ' ' + 'HTTP/1.0' + '\r\n\r\n'
-        swriter.write(new_request.encode())
-        data = await sreader.read(8192)
-        response = data.decode()
-        while not sreader.at_eof():
-            data = await sreader.read(8192)
-            response += data.decode()
-        try:
-            _, xml_str = response.split('\r\n\r\n', 1)
-        except Exception as e:
-            logging.error("Error when parsing metafile: {}".format(e))
-            return
-        await parse_bitrates(xml_str)
-        swriter.close()
 
 
-async def modify_url(url, host):
+def modify_url(url, host):
     logging.debug("modifying host {} and url: {}".format(host, url))
     # parse out server_name, port and uri
     server_name = "video.pku.edu.cn"
@@ -216,14 +190,8 @@ async def modify_url(url, host):
         else:
             server_addr = query_name("video.pku.edu.cn")
     else:
-        resolver = aiodns.DNSResolver(loop=loop)
-        try:
-            result = await resolver.query(server_name, 'A')
-            # just choose the first result
-            server_addr = result[0].host
-        except Exception as e:
-            logging.error("Error when resolving: {}".format(e))
-            return None
+        server_addr = socket.gethostbyname(server_name)
+
 
     # modify request uri
     new_uri = uri
@@ -234,29 +202,7 @@ async def modify_url(url, host):
         else:
             new_uri = file_property.path + file_property.meta_name
     elif file_property.is_chunk:
-        rate = await adapt_bitrate(server_addr)
-
-        if rate is None:
-            logging.debug("fetch true metafile")
-            sreader, swriter = await asyncio.open_connection(server_addr, int(server_port), loop=loop)
-            uri = file_property.path + "big_buck_bunny.f4m"
-            new_request = 'GET' + ' ' + uri + ' ' + 'HTTP/1.0' + '\r\n\r\n'
-            swriter.write(new_request.encode())
-            data = await sreader.read(8192)
-            response = data.decode()
-            while not sreader.at_eof():
-                data = await sreader.read(8192)
-                response += data.decode()
-            try:
-                _, xml_str = response.split('\r\n\r\n', 1)
-            except Exception as e:
-                logging.error("Error when parsing metafile: {}".format(e))
-                exit(1)
-            await parse_bitrates(xml_str)
-            swriter.close()
-            
-            rate = await adapt_bitrate(server_addr)
-
+        rate = adapt_bitrate(server_addr)
         new_uri = file_property.path + str(rate) + 'Seg' + file_property.seg + '-Frag' + file_property.frag
 
     return server_addr, server_port, new_uri, file_property, rate
@@ -285,35 +231,33 @@ def query_name(name):
         logging.error("Name query gets no answer")
         return None
 
-
-async def adapt_bitrate(ip):
+def adapt_bitrate(ip):
     logging.debug("Adapt bitrate: waiting for readlock")
-    async with rwlock.reader:
-        if ip in throughput_map:
-            cur_throughput = throughput_map[ip]
-            if len(rates) == 0:
-                logging.error("Error: no metadata recorded when adapting bitrates")
-                ans = None
-            else:
-                available = [b for b in rates if cur_throughput >= b * 1.5]
-                if len(available) == 0:
-                    ans = min(rates)
-                else:
-                    ans = max(available)
+    if ip in throughput_map:
+        cur_throughput = throughput_map[ip]
+        if len(rates) == 0:
+            logging.error("Error: no metadata recorded when adapting bitrates")
+            ans = None
         else:
-            if len(rates) == 0:
-                logging.error("Error: no metadata recorded when adapting bitrates")
-                ans = None
-            else:
+            available = [b for b in rates if cur_throughput >= b * 1.5]
+            if len(available) == 0:
                 ans = min(rates)
-        if ans:
-            logging.debug("Stat: adapt bitrate for ip {}: {}".format(ip, ans))
+            else:
+                ans = max(available)
+    else:
+        if len(rates) == 0:
+            logging.error("Error: no metadata recorded when adapting bitrates")
+            ans = None
         else:
-            logging.debug("Stat: cannot choose bitrate for ip {}".format(ip))
-        return ans
+            ans = min(rates)
+    if ans:
+        logging.debug("Stat: adapt bitrate for ip {}: {}".format(ip, ans))
+    else:
+        logging.debug("Stat: cannot choose bitrate for ip {}".format(ip))
+    return ans
 
 
-async def parse_bitrates(xml_str):
+def parse_bitrates(xml_str):
     root = xml.etree.ElementTree.fromstring(xml_str)
     if root.tag != '{http://ns.adobe.com/f4m/1.0}manifest':
         logging.error("Error: not a manifest file")
@@ -326,36 +270,54 @@ async def parse_bitrates(xml_str):
             else:
                 new_rates.append(int(child.attrib['bitrate']))
     logging.debug("Parse bitrates: waiting for writelock")
-    async with rwlock.writer:
-        global rates
-        rates = new_rates
-        logging.debug("Stat: record available bitrates: ".format(rates))
+    global rates
+    rates = new_rates
+    logging.debug("Stat: record available bitrates: ".format(rates))
 
 
-async def update_throughput(throuput, ip):
+def update_throughput(throuput, ip):
     logging.debug("Update throughput: waiting for writelock")
-    async with rwlock.writer:
-        if ip in throughput_map:
-            throughput_map[ip] = alpha * throuput + (1 - alpha) * throughput_map[ip]
-        else:
-            throughput_map[ip] = throuput
-        logging.debug("Stat: update throughput from {}: {}".format(ip, throughput_map[ip]))
-        return throughput_map[ip]
+    if ip in throughput_map:
+        throughput_map[ip] = alpha * throuput + (1 - alpha) * throughput_map[ip]
+    else:
+        throughput_map[ip] = throuput
+    logging.debug("Stat: update throughput from {}: {}".format(ip, throughput_map[ip]))
+    return throughput_map[ip]
 
 
 addr = config['listen_addr']
 port = int(config['listen_port'])
-coro = asyncio.start_server(forwarding, addr, port, loop=loop)
-server = loop.run_until_complete(coro)
 
-logging.debug('Listening on {}'.format(server.sockets[0].getsockname()))
 
-try:
-    loop.run_forever()
-except KeyboardInterrupt:
-    pass
+logging.debug("fetch true metafile")
+s = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+addr = query_name("video.pku.edu.cn")
+s.connect((addr, 8080))
+uri = "/vod/big_buck_bunny.f4m"
+new_request = 'GET' + ' ' + uri + ' ' + 'HTTP/1.0' + '\r\n\r\n'
+s.send(new_request.encode())
 
-logging.debug('Shutdown server')
-server.close()
-loop.run_until_complete(server.wait_closed())
-loop.close()
+data = b''
+while True:
+    d = s.recv(8192)
+    if d:
+        data += d
+    else:
+        break
+response = data.decode()
+
+_, xml_str = response.split('\r\n\r\n', 1)
+
+parse_bitrates(xml_str)
+s.close()
+
+s = socket.socket(family=socket.AF_INET, type = socket.SOCK_STREAM)
+s.bind((addr, port))
+s.listen(4)
+
+logging.debug('Proxy listening on port {}'.format(port))
+
+while True:
+    sock, addr = s.accept()
+    t = threading.Thread(target=forwarding, args=(sock, addr))
+    t.start()
